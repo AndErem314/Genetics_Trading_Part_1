@@ -1,0 +1,15 @@
+# GP Crypto Trading Strategy — Dependencies
+# Install: pip install -r requirements.txt
+
+numpy>=1.24
+pandas>=2.0
+deap>=1.4
+dill>=0.3.7
+ccxt>=4.0
+
+# Backtesting engines (choose one or both)
+Backtesting>=0.3.3
+vectorbt>=0.26           # optional — only needed for gp_crypto_strategy_vectorbt.py
+
+# Plotting (optional)
+matplotlib>=3.7
