@@ -35,7 +35,7 @@ The system uses **margin trading** to support both long and short positions:
 - Signal < 0 → **Short** BTC (borrow & sell)
 - Signal ≈ 0 → **Flat** (no position)
 
-Default leverage: 3× margin.
+Default leverage: 5× margin.
 
 ## Architecture
 
@@ -236,7 +236,7 @@ Key parameters in `gp_crypto_strategy.py`:
 | `MAX_LEN` | 60 | Maximum nodes per tree |
 | `INITIAL_CASH` | 100,000 | Starting capital (USD) |
 | `COMMISSION_PCT` | 0.001 | Trading fee (0.1% per trade) |
-| `MARGIN` | 1/3 | Margin ratio (3× leverage) |
+| `MARGIN` | 1/5 | Margin ratio (5× leverage) |
 | `NO_TRADE_BAND` | 5 | Dead-band filter (±5 percentage points) |
 
 ### Data Period

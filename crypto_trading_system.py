@@ -140,6 +140,7 @@ class LiveGPStrategy(Strategy):
                         raise RuntimeError(f"Column {name} not found")
 
             desired_pct = self.model_manager.get_signal(market_data)
+            desired_pct = max(-100.0, min(100.0, desired_pct))
 
             self.signal_history.append({
                 "timestamp": self.data.index[-1],

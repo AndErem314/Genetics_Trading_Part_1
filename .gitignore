@@ -1,0 +1,16 @@
+# IDE
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Data (downloaded via crypto_data_downloader.py)
+data/*.csv
+
+# Trained models
+*.dill
+
+# OS
+.DS_Store

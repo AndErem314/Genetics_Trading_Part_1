@@ -10,6 +10,7 @@ import math
 import operator
 import random
 import time
+import warnings
 from pathlib import Path
 from typing import Dict, Tuple, List
 
@@ -18,6 +19,10 @@ import numpy as np
 import pandas as pd
 from backtesting import Backtest, Strategy
 from deap import base, creator, gp, tools
+
+# Suppress backtesting.py margin warnings (orders are silently canceled;
+# the fitness function already penalises poor individuals)
+warnings.filterwarnings("ignore", message=".*insufficient margin.*")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Global random seed for reproducibility
@@ -56,7 +61,7 @@ MAX_LEN   = 60
 # Backtest settings
 INITIAL_CASH   = 100_000       # USD
 COMMISSION_PCT = 0.001         # 0.1% Binance spot taker fee
-MARGIN         = 1 / 3         # 3× leverage for margin trading
+MARGIN         = 1 / 5         # 5× leverage — gives headroom for long↔short swings
 NO_TRADE_BAND  = 5             # ±5 pp dead-band
 BTC_TICK       = 0.00001       # minimum BTC position increment
 
@@ -164,6 +169,8 @@ class GPExposureStrategy(Strategy):
             raise RuntimeError(f"Expected {len(ARG_NAMES)} inputs, got {len(inputs)}")
 
         desired = float(self.expression(*inputs))
+        # Clamp to safe range so margin is never exceeded
+        desired = max(-100.0, min(100.0, desired))
 
         # Dead-band filter
         if abs(desired - self.current_pct) <= NO_TRADE_BAND:
