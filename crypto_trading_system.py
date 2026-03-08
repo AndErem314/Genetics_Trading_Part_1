@@ -33,7 +33,7 @@ from gp_crypto_strategy import (
     NO_TRADE_BAND, BTC_TICK,
     pset, toolbox,
     round_btc, pct_to_units, load_all_pairs, split_dataset,
-    _prepare_bt_dataframe,
+    _prepare_bt_dataframe, normalize_inputs,
 )
 
 warnings.filterwarnings("ignore")
@@ -128,16 +128,9 @@ class LiveGPStrategy(Strategy):
 
     def next(self):
         try:
-            market_data = {}
-            for name in ARG_NAMES:
-                if name in self.data.df.columns:
-                    market_data[name] = float(self.data.df[name].iloc[-1])
-                else:
-                    short = name.replace(f"{PRIMARY_SYMBOL}_", "")
-                    if short in self.data.df.columns:
-                        market_data[name] = float(self.data.df[short].iloc[-1])
-                    else:
-                        raise RuntimeError(f"Column {name} not found")
+            # Read normalised-return inputs directly from dataframe
+            market_data = {name: float(self.data.df[name].iloc[-1])
+                          for name in ARG_NAMES}
 
             desired_pct = self.model_manager.get_signal(market_data)
             desired_pct = max(-100.0, min(100.0, desired_pct))
@@ -190,7 +183,13 @@ def generate_signals(model_manager: GPModelManager,
                      data: pd.DataFrame,
                      start_date: str = None,
                      end_date: str = None) -> pd.DataFrame:
-    """Generate trading signals for a date range."""
+    """Generate trading signals for a date range.
+
+    *data* should be the raw output of load_all_pairs(); normalisation
+    is applied automatically.
+    """
+    data = normalize_inputs(data)
+
     if start_date and end_date:
         period = data.loc[start_date:end_date].copy()
     else:
@@ -201,18 +200,10 @@ def generate_signals(model_manager: GPModelManager,
     signals = []
     for idx, row in period.iterrows():
         try:
-            md = {}
-            for name in ARG_NAMES:
-                if name in row.index:
-                    md[name] = float(row[name])
-                else:
-                    short = name.replace(f"{PRIMARY_SYMBOL}_", "")
-                    md[name] = float(row.get(short, 0.0))
-
+            md = {name: float(row[name]) for name in ARG_NAMES}
             sig = model_manager.get_signal(md)
             signals.append({"timestamp": idx, "signal": sig,
-                            "btc_close": row.get(f"{PRIMARY_SYMBOL}_Close",
-                                                 row.get("Close", 0))})
+                            "btc_close": row.get("Raw_Close", 0)})
         except Exception:
             signals.append({"timestamp": idx, "signal": 0.0, "btc_close": 0.0})
 
@@ -234,6 +225,7 @@ def walk_forward_analysis(data_dir: Path = None,
     print(f"Walk-forward: window={window_months}m, step={step_months}m")
 
     df_all = load_all_pairs(data_dir)
+    df_all = normalize_inputs(df_all)
     mm = GPModelManager(model_path)
     if not mm.load_model():
         raise RuntimeError("Cannot load model")
@@ -298,6 +290,7 @@ class ProductionTradingBot:
         self.equity = INITIAL_CASH
         self.trade_history = []
         self.last_signal = 0.0
+        self._prev_prices = {}  # for computing bar-to-bar returns
 
     def initialize(self) -> bool:
         print("Initializing Production Trading Bot ...")
@@ -306,10 +299,21 @@ class ProductionTradingBot:
         print("Bot ready.")
         return True
 
+    def _normalize_bar(self, market_data: Dict[str, float]) -> Dict[str, float]:
+        """Convert raw prices to 1-bar returns using previous bar's prices."""
+        normalized = {}
+        for name in ARG_NAMES:
+            raw = market_data[name]
+            prev = self._prev_prices.get(name, raw)
+            normalized[name] = (raw - prev) / prev if abs(prev) > 1e-8 else 0.0
+            self._prev_prices[name] = raw
+        return normalized
+
     def process_market_data(self, market_data: Dict[str, float]) -> Dict:
         """Process a new bar and return trading decision."""
         try:
-            signal = self.model_manager.get_signal(market_data)
+            normalized = self._normalize_bar(market_data)
+            signal = self.model_manager.get_signal(normalized)
             position_change = 0.0
 
             if abs(signal - self.last_signal) > NO_TRADE_BAND:
@@ -376,6 +380,7 @@ def backtest_saved_model(data_dir: Path = None,
     print(f"Backtesting model: {model_path}")
 
     df_all = load_all_pairs(data_dir)
+    df_all = normalize_inputs(df_all)
 
     if start_date and end_date:
         df_test = df_all.loc[start_date:end_date]

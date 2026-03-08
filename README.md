@@ -7,9 +7,9 @@ to trade **BTCUSDT** on Binance spot markets using multi-asset context from
 ## Overview
 
 The system uses [DEAP](https://github.com/DEAP/deap) (Distributed Evolutionary
-Algorithms in Python) to evolve expression trees that take raw OHLC price data
-from multiple crypto assets and output a trading signal (desired portfolio
-exposure from -100% to +100%).
+Algorithms in Python) to evolve expression trees that take **normalised OHLC
+returns** from multiple crypto assets and output a trading signal (desired
+portfolio exposure from -100% to +100%).
 
 **Key principle:** Instead of hand-coding technical indicators (RSI, MACD, etc.),
 the GP algorithm discovers its own mathematical formulas by combining raw price
@@ -25,8 +25,9 @@ data with arithmetic, trigonometric, and comparison operators through evolution.
 | BNBUSDT  | Context feature   | Binance Coin — exchange token        |
 | LTCUSDT  | Context feature   | Litecoin — oldest altcoin, stable correlation |
 
-The GP tree receives **20 inputs** (5 pairs × 4 OHLC values) and outputs a
-single number: the desired BTC exposure percentage.
+The GP tree receives **20 inputs** (5 pairs × 4 OHLC values, normalised to
+1-bar percentage returns) and outputs a single number: the desired BTC
+exposure percentage.
 
 ### Trading Mode
 
@@ -237,7 +238,8 @@ Key parameters in `gp_crypto_strategy.py`:
 | `INITIAL_CASH` | 100,000 | Starting capital (USD) |
 | `COMMISSION_PCT` | 0.001 | Trading fee (0.1% per trade) |
 | `MARGIN` | 1/5 | Margin ratio (5× leverage) |
-| `NO_TRADE_BAND` | 5 | Dead-band filter (±5 percentage points) |
+| `NO_TRADE_BAND` | 15 | Dead-band filter (±15 percentage points) |
+| `MAX_TRADES` | 500 | Overtrading penalty threshold |
 
 ### Data Period
 
@@ -246,6 +248,17 @@ Key parameters in `gp_crypto_strategy.py`:
 | Train | 2021-07-01 → 2024-01-01 | 21,900 |
 | Validation | 2024-01-01 → 2024-07-01 | 4,344 |
 | Test | 2024-07-01 → 2025-03-07 | 5,800 |
+
+### Input Normalisation
+
+All 20 OHLC inputs are converted from raw prices to **1-bar percentage
+returns** before being fed to the GP tree.  This prevents the GP from
+exploiting absolute price-scale differences between symbols (e.g. BTC at
+~\$90,000 vs SOL at ~\$150) and forces the evolved formulas to learn
+meaningful cross-asset relationships rather than trivial price comparisons.
+
+Raw BTCUSDT prices are preserved separately (`Raw_Open/High/Low/Close`
+columns) so that the execution engine can still place orders at real prices.
 
 ### GP Primitives
 
@@ -258,9 +271,10 @@ The expression trees can use these building blocks:
 
 ### Fitness Function
 
-The fitness is based on **Sharpe Ratio** (minimise `-sharpe`):
+The fitness is based on **Sharpe Ratio** (minimise `-sharpe + 0.001 * tree_size`):
 - Sharpe Ratio rewards consistent risk-adjusted returns
-- Penalties applied for: drawdown > 40%, fewer than 20 trades, account blowup
+- Parsimony pressure discourages bloated expression trees
+- Penalties applied for: drawdown > 40%, fewer than 20 trades, >500 trades, account blowup
 
 ## Project History
 
@@ -275,8 +289,10 @@ cryptocurrency markets with the following changes:
 - Dukascopy CSV → Binance via ccxt
 - Added margin support for long/short trading
 - Raw return fitness → Sharpe-based fitness
+- Added input normalisation (raw OHLC prices → 1-bar percentage returns)
+- Added parsimony pressure and overtrading penalties
 
-The original FX files (`gp_strategy_progress.py`, `gp_strategy_progress_vectorbt.py`,
+The original FX files
 `trading_system_Load_Infer.py`) are preserved in the repository for reference.
 
 ## License

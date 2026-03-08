@@ -39,6 +39,7 @@ INITIAL_CASH   = 100_000
 COMMISSION_PCT = 0.001               # 0.1 %
 NO_TRADE_BAND  = 15                  # ±15 pp dead-band (reduce overtrading)
 MAX_TRADES     = 500                 # penalise strategies exceeding this
+RAW_CLOSE_COL  = "Raw_Close"         # raw price column for portfolio sim
 
 _eval_count = 0
 
@@ -70,6 +71,24 @@ def split_dataset(df):
     return (df.loc[TRAIN_START:TRAIN_END],
             df.loc[VAL_START:VAL_END],
             df.loc[TEST_START:TEST_END])
+
+
+def normalize_inputs(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert raw OHLC prices to 1-bar percentage returns for GP inputs.
+
+    Prevents the GP from exploiting absolute price-scale differences
+    between symbols.  Raw BTCUSDT close is preserved for portfolio
+    simulation.
+    """
+    df = df.copy()
+    prefix = f"{PRIMARY_SYMBOL}_"
+    for field in ("Open", "High", "Low", "Close"):
+        df[f"Raw_{field}"] = df[f"{prefix}{field}"].copy()
+
+    for col in ARG_NAMES:
+        df[col] = df[col].pct_change().fillna(0.0)
+
+    return df
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -156,7 +175,7 @@ def evaluate_individual(ind, df_slice: pd.DataFrame) -> Tuple[float]:
         weights[delta < NO_TRADE_BAND / 100] = np.nan
         weights = pd.Series(weights, index=df_slice.index).ffill().fillna(0.0)
 
-        port = _simulate(df_slice[f"{PRIMARY_SYMBOL}_Close"], weights)
+        port = _simulate(df_slice[RAW_CLOSE_COL], weights)
 
         total_ret = port.total_return()
         n_trades  = port.stats()["Total Trades"]
@@ -252,7 +271,7 @@ def backtest_slice(individual, df_slice, label):
     weights[delta < NO_TRADE_BAND / 100] = np.nan
     weights = pd.Series(weights, index=df_slice.index).ffill().fillna(0.0)
 
-    pf = _simulate(df_slice[f"{PRIMARY_SYMBOL}_Close"], weights)
+    pf = _simulate(df_slice[RAW_CLOSE_COL], weights)
     stats = pf.stats()
 
     wanted = ["Total Return [%]", "Sharpe Ratio", "Total Trades", "Win Rate [%]"]
@@ -273,6 +292,7 @@ def backtest_slice(individual, df_slice, label):
 def main():
     print("📦 Loading data ...")
     df_all = load_all_pairs()
+    df_all = normalize_inputs(df_all)
     train, val, test = split_dataset(df_all)
 
     print(f"🧬 Running evolution (vectorbt engine) ...")

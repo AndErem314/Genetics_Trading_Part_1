@@ -65,6 +65,7 @@ MARGIN         = 1 / 5         # 5× leverage — gives headroom for long↔shor
 NO_TRADE_BAND  = 15            # ±15 pp dead-band (reduce overtrading)
 BTC_TICK       = 0.00001       # minimum BTC position increment
 MAX_TRADES     = 500           # penalise strategies exceeding this
+RAW_CLOSE_COL  = "Raw_Close"   # raw price column preserved after normalisation
 
 # Progress tracking
 _evaluation_count = 0
@@ -126,6 +127,28 @@ def split_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Data
     return train, val, test
 
 
+def normalize_inputs(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert raw OHLC prices to 1-bar percentage returns for GP inputs.
+
+    Prevents the GP from exploiting absolute price-scale differences
+    between symbols (e.g. BTC ~90k vs SOL ~150).  All GP inputs become
+    small numbers roughly in [-0.05, 0.05], while raw BTCUSDT prices are
+    preserved in Raw_* columns for order execution.
+    """
+    df = df.copy()
+    # Preserve raw BTCUSDT OHLC for backtesting.py execution
+    prefix = f"{PRIMARY_SYMBOL}_"
+    for field in ("Open", "High", "Low", "Close"):
+        df[f"Raw_{field}"] = df[f"{prefix}{field}"].copy()
+
+    # Convert all 20 GP input columns to 1-bar percentage returns
+    for col in ARG_NAMES:
+        df[col] = df[col].pct_change().fillna(0.0)
+
+    print("📐 Inputs normalised to 1-bar percentage returns")
+    return df
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -153,21 +176,8 @@ class GPExposureStrategy(Strategy):
         self.current_pct = 0.0
 
     def next(self):
-        # Build input vector (20 values) in canonical ARG_NAMES order
-        inputs = []
-        for name in ARG_NAMES:
-            if name in self.data.df.columns:
-                inputs.append(float(self.data.df[name].iloc[-1]))
-            else:
-                # Primary symbol columns have no prefix in backtesting.py df
-                short_name = name.replace(f"{PRIMARY_SYMBOL}_", "")
-                if short_name in self.data.df.columns:
-                    inputs.append(float(self.data.df[short_name].iloc[-1]))
-                else:
-                    raise RuntimeError(f"Column {name} not found in dataframe")
-
-        if len(inputs) != len(ARG_NAMES):
-            raise RuntimeError(f"Expected {len(ARG_NAMES)} inputs, got {len(inputs)}")
+        # Build input vector (20 normalised-return values)
+        inputs = [float(self.data.df[name].iloc[-1]) for name in ARG_NAMES]
 
         desired = float(self.expression(*inputs))
         # Clamp to safe range so margin is never exceeded
@@ -251,12 +261,20 @@ print("✅ GP framework ready (20 inputs, ±100 long/short)")
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _prepare_bt_dataframe(df_slice: pd.DataFrame) -> pd.DataFrame:
-    """Extract BTCUSDT as OHLC for backtesting.py and join other columns."""
-    prefix = f"{PRIMARY_SYMBOL}_"
-    btc = df_slice[[c for c in df_slice.columns if c.startswith(prefix)]].copy()
-    btc.columns = [c.replace(prefix, "") for c in btc.columns]  # Open, High, Low, Close
-    extras = df_slice[[c for c in df_slice.columns if not c.startswith(prefix)]]
-    return btc.join(extras)
+    """Build backtesting.py DataFrame.
+
+    Raw BTCUSDT prices (from Raw_* columns) become Open/High/Low/Close
+    for order execution.  All 20 normalised-return GP input columns
+    (ARG_NAMES) are kept alongside for the strategy to read.
+    """
+    # Raw BTC prices for backtesting.py execution engine
+    raw_cols = ["Raw_Open", "Raw_High", "Raw_Low", "Raw_Close"]
+    btc = df_slice[raw_cols].copy()
+    btc.columns = ["Open", "High", "Low", "Close"]
+
+    # Normalised return columns for GP inputs
+    gp_cols = df_slice[ARG_NAMES].copy()
+    return btc.join(gp_cols)
 
 
 def evaluate_individual(individual, df_train: pd.DataFrame) -> Tuple[float]:
@@ -444,9 +462,10 @@ def main():
     print("GP Crypto Strategy — Evolution (backtesting.py)")
     print("=" * 60)
 
-    # 1) Load & split
+    # 1) Load, normalise & split
     print("\n── PHASE 1: Data ──")
     df_all = load_all_pairs()
+    df_all = normalize_inputs(df_all)
     train_df, val_df, test_df = split_dataset(df_all)
 
     # 2) Evolve
