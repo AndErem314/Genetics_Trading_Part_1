@@ -31,13 +31,14 @@ TRAIN_START, TRAIN_END = "2021-07-01 00:00:00", "2024-01-01 00:00:00"
 VAL_START,   VAL_END   = "2024-01-01 00:00:00", "2024-07-01 00:00:00"
 TEST_START,  TEST_END  = "2024-07-01 00:00:00", "2025-03-07 00:00:00"
 
-POP_SIZE, N_GEN = 1000, 15          # smaller default for vectorbt (adjust)
+POP_SIZE, N_GEN = 7500, 15          # synced with gp_crypto_strategy.py
 P_CX, P_MUT     = 0.90, 0.15
 MAX_DEPTH, MAX_LEN = 8, 60
 
 INITIAL_CASH   = 100_000
 COMMISSION_PCT = 0.001               # 0.1 %
-NO_TRADE_BAND  = 5                   # ±5 pp dead-band
+NO_TRADE_BAND  = 15                  # ±15 pp dead-band (reduce overtrading)
+MAX_TRADES     = 500                 # penalise strategies exceeding this
 
 _eval_count = 0
 
@@ -169,7 +170,13 @@ def evaluate_individual(ind, df_slice: pd.DataFrame) -> Tuple[float]:
         if np.isnan(sharpe):
             return (1e6,)
 
-        return (-sharpe,)           # minimise negative Sharpe
+        # Penalise overtrading: halve Sharpe if too many trades
+        if n_trades > MAX_TRADES:
+            sharpe *= 0.5
+
+        # Parsimony pressure: slightly penalise large trees
+        fitness = -sharpe + 0.001 * len(ind)
+        return (fitness,)
 
     except Exception as e:
         return (1e6,)

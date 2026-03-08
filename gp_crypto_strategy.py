@@ -62,8 +62,9 @@ MAX_LEN   = 60
 INITIAL_CASH   = 100_000       # USD
 COMMISSION_PCT = 0.001         # 0.1% Binance spot taker fee
 MARGIN         = 1 / 5         # 5× leverage — gives headroom for long↔short swings
-NO_TRADE_BAND  = 5             # ±5 pp dead-band
+NO_TRADE_BAND  = 15            # ±15 pp dead-band (reduce overtrading)
 BTC_TICK       = 0.00001       # minimum BTC position increment
+MAX_TRADES     = 500           # penalise strategies exceeding this
 
 # Progress tracking
 _evaluation_count = 0
@@ -297,8 +298,12 @@ def evaluate_individual(individual, df_train: pd.DataFrame) -> Tuple[float]:
         if np.isnan(sharpe):
             return (1e6,)
 
-        # Minimise negative Sharpe (lower = better)
-        fitness = -sharpe
+        # Penalise overtrading: halve Sharpe if too many trades
+        if n_trades > MAX_TRADES:
+            sharpe *= 0.5
+
+        # Parsimony pressure: slightly penalise large trees
+        fitness = -sharpe + 0.001 * len(individual)
         return (fitness,)
 
     except Exception:
